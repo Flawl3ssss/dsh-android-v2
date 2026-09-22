@@ -26,7 +26,9 @@ jobs:
           mkdir -p /tmp/pay3/profiles/node_modules
           cp -r /tmp/pay3/stage/node_modules/* /tmp/pay3/profiles/node_modules/
           cd /tmp/pay3/profiles
-          npm install --no-save --no-audit --no-fund \
+          # optionalDependencies под x64-раннер НЕ ставятся для arm64 — тянем явно с флагами.
+          # (Проверено: без --cpu/--os npm ставит только x64-натив.)
+          npm install --no-save --no-audit --no-fund --cpu arm64 --os linux \
             @deepseek-ai/node-addon-system-linux-arm64 \
             @koromix/koffi-linux-arm64 \
             @img/sharp-linuxmusl-arm64 2>&1 | tail -n 3 || true
