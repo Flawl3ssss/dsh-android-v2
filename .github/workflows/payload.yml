@@ -26,12 +26,19 @@ jobs:
           mkdir -p /tmp/pay3/profiles/node_modules
           cp -r /tmp/pay3/stage/node_modules/* /tmp/pay3/profiles/node_modules/
           cd /tmp/pay3/profiles
-          # optionalDependencies под x64-раннер НЕ ставятся для arm64 — тянем явно с флагами.
-          # (Проверено: без --cpu/--os npm ставит только x64-натив.)
-          npm install --no-save --no-audit --no-fund --cpu arm64 --os linux \
-            @deepseek-ai/node-addon-system-linux-arm64 \
-            @koromix/koffi-linux-arm64 \
-            @img/sharp-linuxmusl-arm64 2>&1 | tail -n 3 || true
+          # Натив: x64-раннер ставит optionalDeps только под x64 (остальные UNMET).
+          # Доставляем arm64-варианты вручную из npm (имена — из optionalDependencies
+          # родителей: node-addon-system/koffi/sharp/sherpa-onnx/node-pty/ripgrep).
+          for spec in \
+            "@deepseek-ai/node-addon-system-linux-arm64@0.1.2" \
+            "@koromix/koffi-linux-arm64@3.3.1" \
+            "@img/sharp-linuxmusl-arm64@0.35.4" \
+            "sherpa-onnx-linux-arm64@1.13.8" \
+            "@vscode/ripgrep-linux-arm64@1.18.0" \
+            "node-addon-require-builtin-linux-arm64-gnu@0.1.6"; do
+            npm install --no-save --no-audit --no-fund --cpu arm64 --os linux "$spec" 2>&1 | tail -n 1 || \
+              echo "MISS: $spec"
+          done
           # Удаляем x64-натив (на телефоне arm64 он мёртвый груз и ломает резолв).
           rm -rf /tmp/pay3/profiles/node_modules/@deepseek-ai/node-addon-system-linux-x64 \
             /tmp/pay3/profiles/node_modules/@koromix/koffi-linux-x64 \
