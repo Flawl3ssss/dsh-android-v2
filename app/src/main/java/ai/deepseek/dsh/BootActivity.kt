@@ -506,28 +506,21 @@ class BootActivity : Activity() {
     }
 
     private fun probeProot() {
-        val bin = nativeProotOrFallback()
-        val root = Paths.debianDir(this).absolutePath
-        // ensureLoader через full(): распаковка loader обязательна до любых проб.
+        // ensureLoader: распаковка loader обязательна до любых проб.
         Proot.ensureLoader(this)
+        val root = Paths.debianDir(this).absolutePath
         for (n in arrayOf("bin/echo", "bin/true", "bin/bash", "opt/node/bin/node")) {
             ui("rootfs check $n: ${File(root, n).exists()}")
         }
         val tmp = Proot.tmpDir(this).absolutePath
         ui("loader: ${File(tmp, "loader").exists()} ${File(tmp, "loader").length()}b, " +
             "loader32: ${File(tmp, "loader32").exists()} ${File(tmp, "loader32").length()}b")
-        runProbe("version", bin + listOf("--version"))
-        // Прямой exec гостевого бинаря БЕЗ -r: проверяем связку linker+loader отдельно от rootfs.
-        runProbe("loader-exec", bin + listOf("/bin/echo", "loader-ok"))
-        runProbe("true", bin + listOf("-r", root, "/bin/true"))
-    }
-
-    /** Всегда linker64 + native lib; fallback — только если bundled нет (тогда прямой exec). */
-    private fun nativeProotOrFallback(): List<String> {
-        val bundled = File(applicationInfo.nativeLibraryDir, "libproot.so")
-        return if (bundled.exists() && bundled.length() > 100000) {
-            listOf("/system/bin/linker64", bundled.absolutePath)
-        } else listOf(Paths.prootBin(this).absolutePath)
+        // ВАЖНО: голый ProcessBuilder НЕ наследует PROOT_LOADER/PROOT_TMP_DIR —
+        // proot ищет loader по Termux-дефолту и падает. Пробы идут через Proot.full()
+        // (env -i + PROOT_* внутри), как и весь рантайм.
+        val prefs = Prefs(this)
+        runProbe("version", Proot.full(this, prefs, listOf("--version")))
+        runProbe("true", Proot.full(this, prefs, listOf("-r", root, "/bin/true"), "/root"))
     }
 
     private fun runProbe(tag: String, cmd: List<String>) {
@@ -555,7 +548,8 @@ class BootActivity : Activity() {
 
     private fun smokeProot() {
         val root = Paths.debianDir(this).absolutePath
-        val argv = nativeProotOrFallback() + listOf("-r", root, "/bin/echo", "proot-ok")
+        // Тот же путь что рантайм: Proot.full (linker64 + PROOT_LOADER/TMP_DIR + env -i).
+        val argv = Proot.full(this, Prefs(this), listOf("-r", root, "/bin/echo", "proot-ok"), "/root")
         val p = ProcessBuilder(argv).start()
         val out = p.inputStream.bufferedReader().readText().trim()
         val code = p.waitFor()
