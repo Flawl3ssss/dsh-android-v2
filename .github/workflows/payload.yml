@@ -25,10 +25,10 @@ jobs:
           npm i --prefix /tmp/pay3/stage @deepseek-ai/dsh@0.1.7-alpha.1 --no-audit --no-fund 2>&1 | tail -n 3
           mkdir -p /tmp/pay3/profiles/node_modules
           cp -r /tmp/pay3/stage/node_modules/* /tmp/pay3/profiles/node_modules/
-          cd /tmp/pay3/profiles
           # Натив: x64-раннер ставит optionalDeps только под x64 (остальные UNMET).
-          # Доставляем arm64-варианты вручную из npm (имена — из optionalDependencies
-          # родителей: node-addon-system/koffi/sharp/sherpa-onnx/node-pty/ripgrep).
+          # Доставляем arm64-варианты напрямую tarball'ами (npm install с --cpu/--os
+          # здесь отказывает notsup, т.к. сам npm бежит на x64; прямые URL без проверок).
+          ARM=/tmp/arm64pkgs && rm -rf $ARM && mkdir -p $ARM && cd $ARM
           for spec in \
             "@deepseek-ai/node-addon-system-linux-arm64@0.1.2" \
             "@koromix/koffi-linux-arm64@3.3.1" \
@@ -36,9 +36,17 @@ jobs:
             "sherpa-onnx-linux-arm64@1.13.8" \
             "@vscode/ripgrep-linux-arm64@1.18.0" \
             "node-addon-require-builtin-linux-arm64-gnu@0.1.6"; do
-            npm install --no-save --no-audit --no-fund --cpu arm64 --os linux "$spec" 2>&1 | tail -n 1 || \
-              echo "MISS: $spec"
+            url=$(npm view "$spec" dist.tarball 2>/dev/null) || { echo "MISS view: $spec"; continue; }
+            echo "fetch $spec -> $url"
+            curl -fsSL "$url" -o pkg.tgz || { echo "MISS fetch: $spec"; continue; }
+            dir="/tmp/pay3/profiles/node_modules/$(echo "$spec" | cut -d@ -f1-2 | cut -d@ -f2 | python3 -c 'import sys,json' 2>/dev/null || echo x)"
+            # имя пакета = всё до @версии
+            name="${spec%@*}"
+            mkdir -p "/tmp/pay3/profiles/node_modules/$name"
+            tar -xzf pkg.tgz -C "/tmp/pay3/profiles/node_modules/$name" --strip-components=1
+            echo "installed $name"
           done
+          cd /tmp/pay3/profiles
           # Удаляем x64-натив (на телефоне arm64 он мёртвый груз и ломает резолв).
           rm -rf /tmp/pay3/profiles/node_modules/@deepseek-ai/node-addon-system-linux-x64 \
             /tmp/pay3/profiles/node_modules/@koromix/koffi-linux-x64 \
