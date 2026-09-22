@@ -69,7 +69,7 @@ object TarWriter {
 
 /**
  * BackupWorker v2 (MOD-09): расширенный список R-08 — sessions, settings,
- * .credentials.yaml, profiles/*/cordis.patch.yml, storages, attachments,
+ * .credentials.yaml, per-profile cordis.patch.yml, storages, attachments,
  * zen-sessions.json, payload.json. Manifest + версия. Ротация 7 daily + 4 weekly.
  */
 class BackupWorker(c: Context, p: WorkerParameters) : Worker(c, p) {
