@@ -508,10 +508,17 @@ class BootActivity : Activity() {
     private fun probeProot() {
         val bin = nativeProotOrFallback()
         val root = Paths.debianDir(this).absolutePath
+        // ensureLoader через full(): распаковка loader обязательна до любых проб.
+        Proot.ensureLoader(this)
         for (n in arrayOf("bin/echo", "bin/true", "bin/bash", "opt/node/bin/node")) {
             ui("rootfs check $n: ${File(root, n).exists()}")
         }
+        val tmp = Proot.tmpDir(this).absolutePath
+        ui("loader: ${File(tmp, "loader").exists()} ${File(tmp, "loader").length()}b, " +
+            "loader32: ${File(tmp, "loader32").exists()} ${File(tmp, "loader32").length()}b")
         runProbe("version", bin + listOf("--version"))
+        // Прямой exec гостевого бинаря БЕЗ -r: проверяем связку linker+loader отдельно от rootfs.
+        runProbe("loader-exec", bin + listOf("/bin/echo", "loader-ok"))
         runProbe("true", bin + listOf("-r", root, "/bin/true"))
     }
 
