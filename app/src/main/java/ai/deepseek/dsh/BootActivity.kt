@@ -304,8 +304,9 @@ class BootActivity : Activity() {
             "# Home patch layer: default model -> zen adapter route.\n" +
                 "- id: agent-default-model\n  config:\n    provider: zen\n    model: ${Prefs(this).model()}\n"
         )
-        // ВАЖНО: hand-declared route без models отклоняется валидацией (llm-pi-ai README),
-        // поэтому модели перечислены явно, а не пустым списком.
+        // ВАЖНО: hand-declared route (каталог pi-ai его не знает) требует api + baseURL +
+        // НЕПУСТОЙ models (валидация llm-pi-ai отклоняет такие роуты без моделей).
+        // Модели — passthrough-имена zen-адаптера; compat чиним при smoke (OPEN-002).
         File(home, "settings.yaml").writeText(
             "llm-pi-ai:\n  providers:\n    zen:\n" +
                 "      displayName: Zen via local adapter\n" +

@@ -14,18 +14,37 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Slim-install DSH 0.1.7-alpha.1
+      - name: Slim-install DSH 0.1.7-alpha.1 (linux-arm64)
         run: |
           set -e
           rm -rf /tmp/pay3 && mkdir -p /tmp/pay3/profiles
           cd /tmp/pay3
           npm init -y > /dev/null 2>&1
+          # ВАЖНО: раннер ubuntu x64 ставит x64-натив; чистим чужые prebuilds,
+          # затем доставляем linux-arm64 натив (system/koffi/sharp/pty/sherpa).
           npm i --prefix /tmp/pay3/stage @deepseek-ai/dsh@0.1.7-alpha.1 --no-audit --no-fund 2>&1 | tail -n 3
           mkdir -p /tmp/pay3/profiles/node_modules
           cp -r /tmp/pay3/stage/node_modules/* /tmp/pay3/profiles/node_modules/
+          cd /tmp/pay3/profiles
+          npm install --no-save --no-audit --no-fund \
+            @deepseek-ai/node-addon-system-linux-arm64 \
+            @koromix/koffi-linux-arm64 \
+            @img/sharp-linuxmusl-arm64 2>&1 | tail -n 3 || true
+          # Удаляем x64-натив (на телефоне arm64 он мёртвый груз и ломает резолв).
+          rm -rf /tmp/pay3/profiles/node_modules/@deepseek-ai/node-addon-system-linux-x64 \
+            /tmp/pay3/profiles/node_modules/@koromix/koffi-linux-x64 \
+            /tmp/pay3/profiles/node_modules/@img/sharp-linux-x64 \
+            /tmp/pay3/profiles/node_modules/node-addon-require-builtin-linux-x64-gnu \
+            /tmp/pay3/profiles/node_modules/sherpa-onnx-linux-x64 \
+            /tmp/pay3/profiles/node_modules/node-pty/prebuilds/linux-x64 \
+            /tmp/pay3/profiles/node_modules/node-pty/prebuilds/darwin-arm64 \
+            /tmp/pay3/profiles/node_modules/node-pty/prebuilds/darwin-x64 \
+            /tmp/pay3/profiles/node_modules/node-pty/prebuilds/win32-arm64 \
+            /tmp/pay3/profiles/node_modules/node-pty/prebuilds/win32-x64 || true
           rm -rf /tmp/pay3/stage /root/.npm 2>/dev/null || true
           npm cache clean --force 2>/dev/null || true
           node -e "const p=require('/tmp/pay3/profiles/node_modules/@deepseek-ai/dsh/package.json'); if(p.version!=='0.1.7-alpha.1') throw new Error('pin mismatch: '+p.version); console.log('dsh pin OK:', p.version)"
+          node -e "const fs=require('fs'); const hits=[]; const walk=d=>{for(const n of fs.readdirSync(d,{withFileTypes:true})){const p=d+'/'+n.name; if(n.isDirectory()){if(n.name==='node_modules'||!p.includes('node_modules')) walk(p);} else if(p.endsWith('.node')) hits.push(p);}}; walk('/tmp/pay3/profiles/node_modules/@deepseek-ai'); console.log('arm64 .node:', hits.filter(h=>h.includes('arm64')||h.includes('musl')).length, '/', hits.length); const bad=hits.filter(h=>h.includes('x64')&&!h.includes('arm64')); if(bad.length){console.log('X64 LEFTOVER:'); bad.slice(0,10).forEach(h=>console.log('  ',h)); throw new Error('x64 native leftover');} console.log('NATIVE ARCH OK: no x64 .node');"
       - name: Web profile skeleton
         run: |
           mkdir -p /tmp/pay3/profiles/web
@@ -85,6 +104,11 @@ jobs:
           dsh = json.loads(tf.extractfile('profiles/node_modules/@deepseek-ai/dsh/package.json').read())
           assert dsh['version'] == '0.1.7-alpha.1', dsh['version']
           assert 'profiles/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html' in names, 'no web dist'
+          bad = [n for n in names if n.endswith('.node') and 'x64' in n and 'arm64' not in n]
+          assert not bad, f'x64 native leftover: {bad[:5]}'
+          arm = [n for n in names if n.endswith('.node') and ('arm64' in n or 'musl' in n)]
+          assert arm, 'no arm64 native at all'
+          print('NATIVE ARCH OK:', len(arm), 'arm64 .node')
           zen = tf.extractfile('bin/zen-adapter.mjs').read().decode()
           assert 'sk-tyHdwr' not in zen, 'live key in payload'
           print('PAYLOAD VERIFY OK:', len(names), 'entries')
