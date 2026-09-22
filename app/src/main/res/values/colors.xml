@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="dsh_bg">#FF0B0E14</color>
+    <color name="dsh_card">#FF151B26</color>
+    <color name="dsh_text">#FFE8ECF3</color>
+    <color name="dsh_dim">#FF9AA3B5</color>
+    <color name="dsh_accent">#FF4D6BFE</color>
+    <color name="dsh_cyan">#FF22D3EE</color>
+    <color name="dsh_ok">#FF34D399</color>
+    <color name="dsh_err">#FFF87171</color>
+</resources>

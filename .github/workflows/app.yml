@@ -1,0 +1,84 @@
+name: app
+# Сборка APK (R-12/R-13): secret-scan + assembleRelease + fresh-key dev-подпись +
+# keystore-релизы через Secrets + публикация в тег. Ключей и токенов в коде нет.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan (fail on leaked tokens)
+        run: |
+          ! grep -rInE 'github_pat_[A-Za-z0-9_]{22,}|gh[pousr]_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{10,}' \
+            --exclude-dir=node_modules --exclude-dir=.git . || \
+            (echo 'LEAKED SECRET PATTERN FOUND'; exit 1)
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK + Gradle
+        run: |
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
+          mkdir -p android-sdk/cmdline-tools
+          unzip -q cmdtools.zip -d android-sdk/cmdline-tools
+          mv android-sdk/cmdline-tools/cmdline-tools android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=/tmp/android-sdk ANDROID_SDK_ROOT=/tmp/android-sdk
+          echo "ANDROID_HOME=/tmp/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/tmp/android-sdk" >> "$GITHUB_ENV"
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "/tmp/android-sdk/build-tools/35.0.0" >> "$GITHUB_PATH"
+          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip -O gradle.zip
+          unzip -q gradle.zip -d /tmp
+          echo "/tmp/gradle-8.10.2/bin" >> "$GITHUB_PATH"
+      - name: Build release APK
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          gradle :app:assembleRelease --no-daemon -q
+          ls -lh app/build/outputs/apk/release/
+      - name: Sign APK (dev fresh key; releases use Secrets keystore when present)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          APK=$(ls app/build/outputs/apk/release/app-release-unsigned.apk)
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > /tmp/release.keystore
+            zipalign -f 4 "$APK" /tmp/dsh-aligned.apk
+            apksigner sign --ks /tmp/release.keystore --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --key-pass pass:"$KEY_PASSWORD" --ks-key-alias "$KEY_ALIAS" \
+              --out /tmp/dsh-android.apk /tmp/dsh-aligned.apk
+          else
+            keytool -genkeypair -keystore /tmp/dsh.keystore -alias dsh \
+              -keyalg RSA -keysize 2048 -validity 9125 -storepass dsh-pass \
+              -keypass dsh-pass -dname "CN=DSH Android" -storetype JKS
+            zipalign -f 4 "$APK" /tmp/dsh-aligned.apk
+            apksigner sign --ks /tmp/dsh.keystore --ks-pass pass:dsh-pass \
+              --key-pass pass:dsh-pass --out /tmp/dsh-android.apk /tmp/dsh-aligned.apk
+          fi
+          apksigner verify --print-certs /tmp/dsh-android.apk
+          ls -lh /tmp/dsh-android.apk
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-android-apk
+          path: /tmp/dsh-android.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload v1.0.0 /tmp/dsh-android.apk --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.0.0 /tmp/dsh-android.apk \
+              --repo "$GITHUB_REPOSITORY" --title "DSH Android 1.0.0"
+          fi

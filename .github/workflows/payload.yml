@@ -1,0 +1,102 @@
+name: payload
+# Payload-3: DSH 0.1.7-alpha.1 (R-01) slim-install + stripped zen-adapter +
+# payload.json v3 + sha256 → релиз payload-3. Ключей в payload нет (R-07).
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Slim-install DSH 0.1.7-alpha.1
+        run: |
+          set -e
+          rm -rf /tmp/pay3 && mkdir -p /tmp/pay3/profiles
+          cd /tmp/pay3
+          npm init -y > /dev/null 2>&1
+          npm i --prefix /tmp/pay3/stage @deepseek-ai/dsh@0.1.7-alpha.1 --no-audit --no-fund 2>&1 | tail -n 3
+          mkdir -p /tmp/pay3/profiles/node_modules
+          cp -r /tmp/pay3/stage/node_modules/* /tmp/pay3/profiles/node_modules/
+          rm -rf /tmp/pay3/stage /root/.npm 2>/dev/null || true
+          npm cache clean --force 2>/dev/null || true
+          node -e "const p=require('/tmp/pay3/profiles/node_modules/@deepseek-ai/dsh/package.json'); if(p.version!=='0.1.7-alpha.1') throw new Error('pin mismatch: '+p.version); console.log('dsh pin OK:', p.version)"
+      - name: Web profile skeleton
+        run: |
+          mkdir -p /tmp/pay3/profiles/web
+          cat > /tmp/pay3/profiles/web/package.json << 'EOF'
+          {
+            "name": "dsh-profile-web",
+            "private": true,
+            "dependencies": {},
+            "dsh": {
+              "profile": {
+                "bundles": [
+                  "@deepseek-ai/dsh-base",
+                  "@deepseek-ai/dsh-web-app"
+                ],
+                "patchReload": "live"
+              }
+            }
+          }
+          EOF
+          printf '# dsh profile root — empty entry list, composed from bundles.\n[]\n' > /tmp/pay3/profiles/web/cordis.yml
+          printf '# user patch layer (managed by app seed, do not pre-fill).\n[]\n' > /tmp/pay3/profiles/web/cordis.patch.yml
+      - name: Zen adapter (stripped, pinned)
+        run: |
+          mkdir -p /tmp/pay3/bin
+          cp "${GITHUB_WORKSPACE}/rootfs/zen-adapter.mjs" /tmp/pay3/bin/zen-adapter.mjs
+          # Strip fallback key: public builds carry NO embedded key (R-07).
+          python3 - << 'EOF'
+          import re
+          p = '/tmp/pay3/bin/zen-adapter.mjs'
+          t = open(p).read()
+          t2, n = re.subn(r'const FALLBACK_KEY = "[^"]*";', 'const FALLBACK_KEY = ""; // stripped for public builds: set key in app Settings', t)
+          assert n == 1, f'FALLBACK pattern count={n}'
+          assert 'sk-tyHdwr' not in t2, 'live key survived strip'
+          open(p, 'w').write(t2)
+          print('zen stripped OK')
+          EOF
+          sha256sum /tmp/pay3/bin/zen-adapter.mjs | tee /tmp/pay3/bin/zen-adapter.mjs.sha256
+          node --check /tmp/pay3/bin/zen-adapter.mjs && echo ZEN_SYNTAX_OK
+      - name: payload.json + pack
+        run: |
+          cat > /tmp/pay3/payload.json << 'EOF'
+          {"payloadVersion": 3, "dshVersion": "0.1.7-alpha.1", "profile": "web", "minApkVersion": 1}
+          EOF
+          tar -C /tmp/pay3 -cJf /tmp/dsh-payload.tar.xz payload.json bin profiles
+          ls -lh /tmp/dsh-payload.tar.xz
+          sha256sum /tmp/dsh-payload.tar.xz | tee /tmp/dsh-payload.tar.xz.sha256
+      - name: Verify payload
+        run: |
+          python3 - << 'EOF'
+          import tarfile, json
+          tf = tarfile.open('/tmp/dsh-payload.tar.xz', 'r:xz')
+          names = tf.getnames()
+          assert 'payload.json' in names, 'no payload.json at top'
+          pj = json.loads(tf.extractfile('payload.json').read())
+          assert pj['dshVersion'] == '0.1.7-alpha.1', pj
+          assert pj['payloadVersion'] == 3, pj
+          dsh = json.loads(tf.extractfile('profiles/node_modules/@deepseek-ai/dsh/package.json').read())
+          assert dsh['version'] == '0.1.7-alpha.1', dsh['version']
+          assert 'profiles/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html' in names, 'no web dist'
+          zen = tf.extractfile('bin/zen-adapter.mjs').read().decode()
+          assert 'sk-tyHdwr' not in zen, 'live key in payload'
+          print('PAYLOAD VERIFY OK:', len(names), 'entries')
+          EOF
+      - name: Publish payload-3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=payload-3
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" /tmp/dsh-payload.tar.xz /tmp/dsh-payload.tar.xz.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" /tmp/dsh-payload.tar.xz /tmp/dsh-payload.tar.xz.sha256 \
+              --repo "$GITHUB_REPOSITORY" --title "DSH payload v3 (0.1.7-alpha.1, no embedded key)"
+          fi

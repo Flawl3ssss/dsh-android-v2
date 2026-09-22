@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DSH" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/dsh_bg</item>
+        <item name="android:textColorPrimary">@color/dsh_text</item>
+        <item name="android:textColorSecondary">@color/dsh_dim</item>
+        <item name="colorPrimary">@color/dsh_accent</item>
+        <item name="colorAccent">@color/dsh_cyan</item>
+    </style>
+</resources>
