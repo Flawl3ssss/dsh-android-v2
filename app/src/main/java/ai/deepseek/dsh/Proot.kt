@@ -19,12 +19,11 @@ object Proot {
         val home = Paths.dshHome(c).absolutePath
         val ws = Paths.workspace(c).absolutePath
         val payload = Paths.payloadDir(c).absolutePath
-        val bin = Paths.prootBin(c)
-        val bundled = Paths.prootLib(c)
-        val useLinker = bundled.exists() && bundled.length() > 100000 &&
-            bin.absolutePath == bundled.absolutePath
-        val head = if (useLinker) listOf("/system/bin/linker64", bin.absolutePath)
-        else listOf(bin.absolutePath)
+        // Bundled .so исполняется только через linker64 прямо из nativeLibraryDir.
+        // Копия в filesDir неработоспособна (noexec) — см. BootActivity.installProot.
+        val head = if (Paths.hasBundledProot(c)) {
+            listOf("/system/bin/linker64", Paths.prootLib(c).absolutePath)
+        } else listOf(Paths.prootBin(c).absolutePath)
         return head + listOf(
             "-r", root,
             "-b", "/dev", "-b", "/proc", "-b", "/sys",

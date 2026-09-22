@@ -22,11 +22,14 @@ object Paths {
     fun dshHome(c: Context) = File(c.filesDir, "dsh-home")
     fun workspace(c: Context) = File(c.filesDir, "workspace")
 
-    /** proot: сначала bundled native lib (правильный SELinux-контекст), иначе filesDir/proot. */
+    /** proot: bundled native lib (linker64) либо fallback-файл filesDir/proot. */
     fun prootLib(c: Context) = File(c.applicationInfo.nativeLibraryDir, "libproot.so")
-    fun prootBin(c: Context): File {
+    fun hasBundledProot(c: Context): Boolean {
         val lib = prootLib(c)
-        if (lib.exists() && lib.length() > 100000) return lib
+        return lib.exists() && lib.length() > 100000
+    }
+    fun prootBin(c: Context): File {
+        if (hasBundledProot(c)) return prootLib(c)
         return File(c.filesDir, "proot")
     }
 
@@ -46,10 +49,11 @@ object Paths {
         if (!File(debianDir(c), "etc/debian_version").exists()) return false
         val pj = File(payloadDir(c), "payload.json")
         if (!pj.exists()) return false
-        // Проверяем пин payload (R-01): принимаем payloadVersion >= 2.
+        // proot: bundled lib (exec прямо из nativeLibraryDir) либо рабочий fallback-файл.
+        // Копия .so в filesDir НЕ считается (там noexec, error=13) — см. installProot.
+        if (!hasBundledProot(c) && !File(c.filesDir, "proot").exists()) return false
         return try {
-            val t = pj.readText()
-            t.contains("\"payloadVersion\"") && prootBin(c).exists()
+            pj.readText().contains("\"payloadVersion\"")
         } catch (_: Exception) {
             false
         }

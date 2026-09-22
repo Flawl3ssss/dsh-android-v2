@@ -481,29 +481,46 @@ class BootActivity : Activity() {
     }
 
     private fun installProot(downloaded: File) {
+        // Приоритет: bundled libproot.so из APK (уже извлечён системой с верным
+        // SELinux-контекстом; запуск через /system/bin/linker64 — см. smokeProot/Proot).
+        // Копирование .so в filesDir ЛОМАЕТ exec (noexec + error=13) — не копируем никогда.
         val bundled = File(applicationInfo.nativeLibraryDir, "libproot.so")
         ui("bundled proot: exists=${bundled.exists()} size=${if (bundled.exists()) bundled.length() else 0}")
-        val src = if (bundled.exists() && bundled.length() > 100000) bundled else {
-            ui("bundled proot missing — fallback to downloaded")
-            if (!downloaded.exists() || downloaded.length() < 100000) {
-                throw IllegalStateException("proot missing (bundled + downloaded)")
-            }
-            downloaded
+        for (dep in listOf("libtalloc.so", "libandroid-shmem.so")) {
+            val f = File(applicationInfo.nativeLibraryDir, dep)
+            ui("bundled $dep: exists=${f.exists()} size=${if (f.exists()) f.length() else 0}")
+        }
+        if (bundled.exists() && bundled.length() > 100000) {
+            ui("proot: using bundled lib (linker64), no copy")
+            return
+        }
+        // Fallback без bundled lib: скачанный файл в app-private (exec может отказать —
+        // тогда только переустановка APK с jniLibs).
+        ui("bundled proot missing — fallback to downloaded")
+        if (!downloaded.exists() || downloaded.length() < 100000) {
+            throw IllegalStateException("proot missing (bundled + downloaded)")
         }
         val dst = Paths.prootBin(this)
-        if (src.absolutePath != dst.absolutePath) src.copyTo(dst, overwrite = true)
-        else ui("proot used in place, no copy")
+        downloaded.copyTo(dst, overwrite = true)
         makeExecutable(dst)
     }
 
     private fun probeProot() {
-        val bin = Paths.prootBin(this).absolutePath
+        val bin = nativeProotOrFallback()
         val root = Paths.debianDir(this).absolutePath
         for (n in arrayOf("bin/echo", "bin/true", "bin/bash", "opt/node/bin/node")) {
             ui("rootfs check $n: ${File(root, n).exists()}")
         }
-        runProbe("version", listOf(bin, "--version"))
-        runProbe("true", listOf(bin, "-r", root, "/bin/true"))
+        runProbe("version", bin + listOf("--version"))
+        runProbe("true", bin + listOf("-r", root, "/bin/true"))
+    }
+
+    /** Всегда linker64 + native lib; fallback — только если bundled нет (тогда прямой exec). */
+    private fun nativeProotOrFallback(): List<String> {
+        val bundled = File(applicationInfo.nativeLibraryDir, "libproot.so")
+        return if (bundled.exists() && bundled.length() > 100000) {
+            listOf("/system/bin/linker64", bundled.absolutePath)
+        } else listOf(Paths.prootBin(this).absolutePath)
     }
 
     private fun runProbe(tag: String, cmd: List<String>) {
@@ -530,11 +547,8 @@ class BootActivity : Activity() {
     }
 
     private fun smokeProot() {
-        val bin = Paths.prootBin(this).absolutePath
         val root = Paths.debianDir(this).absolutePath
-        val argv = if (bin.endsWith(".so") || File(applicationInfo.nativeLibraryDir, "libproot.so").absolutePath == bin) {
-            listOf("/system/bin/linker64", bin, "-r", root, "/bin/echo", "proot-ok")
-        } else listOf(bin, "-r", root, "/bin/echo", "proot-ok")
+        val argv = nativeProotOrFallback() + listOf("-r", root, "/bin/echo", "proot-ok")
         val p = ProcessBuilder(argv).start()
         val out = p.inputStream.bufferedReader().readText().trim()
         val code = p.waitFor()
